@@ -1,69 +1,172 @@
 {
-  "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
-  "contentVersion": "1.0.0.0",
-  "parameters": {   
-    "appName": {
-      "defaultValue": "docanna",
-      "type": "string"
-    },
-    "admin_user": {
-      "defaultValue": "admin",
-      "type": "string"
-    },
-    "admin_pass": {
-      "type": "string"
-    }
-  },
-  "variables": {
-    "servicePlanName": "[concat('serviceplan',uniqueString(resourceGroup().id))]"
-  },
-  "resources": [
-    {
-      "type": "Microsoft.Web/serverfarms",
-      "name": "[variables('servicePlanName')]",
-      "apiVersion": "2016-03-01",
-      "location": "[resourceGroup().location]",
-      "sku": {
-        "name": "B1",
-        "capacity": 1
-      },
-      "kind": "linux",
-      "properties": {
-        "workerSizeId": 0,
-        "reserved": true,
-        "hostingEnvironment": ""
-      }
-    },
-    {
-      "type": "Microsoft.Web/sites",
-      "name": "[parameters('appName')]",
-      "apiVersion": "2016-03-01",
-      "location": "[resourceGroup().location]",
-      "properties": {
-        "name": "[parameters('appName')]",
-        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('servicePlanName'))]"
-      },
-      "dependsOn": [
-        "[resourceId('Microsoft.Web/serverfarms', variables('servicePlanName'))]"
-      ],
-      "resources": [
-        {
-          "name": "appsettings",
-          "type": "config",
-          "apiVersion": "2016-03-01",
-          "dependsOn": [
-            "[resourceId('Microsoft.Web/sites', parameters('appName'))]"
-          ],
-          "tags": {
-            "displayName": "appSettings"
-          },
-          "properties": {
-            "WEBSITES_PORT":8000 ,
-            "DOCKER_CUSTOM_IMAGE_NAME": "abornst/doccano4azure",
-            "DOCKER_CUSTOM_IMAGE_RUN_COMMAND": "abornst/doccano4azure -e admin_user=parameters('admin_user') -e admin_pass=parameters('admin_pass')"
-          }
+    "$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "subscriptionId": {
+            "type": "String"
+        },
+        "name": {
+            "type": "String"
+        },
+        "location": {
+            "type": "String"
+        },
+        "environmentId": {
+            "type": "String"
+        },
+        "containers": {
+            "type": "Array",
+            "defaultValue": [
+                {
+                    "name": "doccano",
+                    "image": "doccano/doccano:latest",
+                    "resources": {
+                        "requests": {
+                            "cpu": "0.5",
+                            "memory": "1.0Gi"
+                        }
+                    },
+                    "env": [
+                        {
+                            "name": "DOCCANO_DATABASE_URL",
+                            "value": "sqlite:///data/db.sqlite3"
+                        },
+                        {
+                            "name": "DOCCANO_STATIC_ROOT",
+                            "value": "/staticfiles"
+                        },
+                        {
+                            "name": "DOCCANO_MEDIA_ROOT",
+                            "value": "/mediafiles"
+                        },
+                        {
+                            "name": "DOCCANO_DEFAULT_ADMIN_USERNAME",
+                            "value": "admin"
+                        },
+                        {
+                            "name": "DOCCANO_DEFAULT_ADMIN_PASSWORD",
+                            "value": "password"
+                        },
+                        {
+                            "name": "DOCCANO_DEFAULT_ADMIN_EMAIL",
+                            "value": "admin@example.com"
+                        }
+                    ],
+                    "volumeMounts": [
+                        {
+                            "mountPath": "/data",
+                            "volumeName": "doccano-data"
+                        },
+                        {
+                            "mountPath": "/mediafiles",
+                            "volumeName": "doccano-media"
+                        }
+                    ]
+                }
+            ]
+        },
+        "secrets": {
+            "defaultValue": {
+                "arrayValue": []
+            },
+            "type": "SecureObject"
+        },
+        "registries": {
+            "type": "Array"
+        },
+        "ingress": {
+            "type": "Object",
+            "defaultValue": {
+                "external": true,
+                "targetPort": 8000
+            }
+        },
+        "environmentName": {
+            "type": "String"
+        },
+        "workspaceName": {
+            "type": "String"
+        },
+        "workspaceLocation": {
+            "type": "String"
         }
-      ]
-    }
-  ]
+    },
+    "resources": [
+        {
+            "type": "Microsoft.App/containerapps",
+            "apiVersion": "2024-02-02-preview",
+            "name": "[parameters('name')]",
+            "location": "[parameters('location')]",
+            "dependsOn": [
+                "[concat('Microsoft.App/managedEnvironments/', parameters('environmentName'))]"
+            ],
+            "kind": "containerapps",
+            "properties": {
+                "environmentId": "[parameters('environmentId')]",
+                "configuration": {
+                    "secrets": "[parameters('secrets').arrayValue]",
+                    "registries": "[parameters('registries')]",
+                    "activeRevisionsMode": "Single",
+                    "ingress": "[parameters('ingress')]"
+                },
+                "template": {
+                    "containers": "[parameters('containers')]",
+                    "volumes": [
+                    {
+                        "name": "doccano-data",
+                        "storageType": "GitHub",
+                        "storageUri": "https://github.com/vanessaolivatto/Doccano4Azure/master/doccano-data"
+                    },
+                    {
+                        "name": "doccano-media",
+                        "storageType": "GitHub",
+                        "storageUri": "https://github.com/vanessaolivatto/Doccano4Azure/master/doccano-media"
+                    }
+                    ]
+                    "scale": {
+                        "minReplicas": 0
+                    }
+                },
+                "workloadProfileName": "Consumption"
+            }
+        },
+        {
+            "type": "Microsoft.App/managedEnvironments",
+            "apiVersion": "2024-02-02-preview",
+            "name": "[parameters('environmentName')]",
+            "location": "[parameters('location')]",
+            "dependsOn": [
+                "[concat('Microsoft.OperationalInsights/workspaces/', parameters('workspaceName'))]"
+            ],
+            "properties": {
+                "appLogsConfiguration": {
+                    "destination": "log-analytics",
+                    "logAnalyticsConfiguration": {
+                        "customerId": "[reference(concat('Microsoft.OperationalInsights/workspaces/', parameters('workspaceName')), '2020-08-01').customerId]",
+                        "sharedKey": "[listKeys(concat('Microsoft.OperationalInsights/workspaces/', parameters('workspaceName')), '2020-08-01').primarySharedKey]"
+                    }
+                },
+                "workloadProfiles": [
+                    {
+                        "name": "Consumption",
+                        "workloadProfileType": "Consumption"
+                    }
+                ]
+            }
+        },
+        {
+            "type": "Microsoft.OperationalInsights/workspaces",
+            "apiVersion": "2020-08-01",
+            "name": "[parameters('workspaceName')]",
+            "location": "[parameters('workspaceLocation')]",
+            "dependsOn": [],
+            "properties": {
+                "sku": {
+                    "name": "PerGB2018"
+                },
+                "retentionInDays": 30,
+                "workspaceCapping": {}
+            }
+        }
+    ]
 }
